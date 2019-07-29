@@ -58,11 +58,11 @@ class GoogleKubernetesConfiguration {
             .setApplicationName(APPLICATION_NAME)
             .build()
 
-        gkeClient.projects()
-            .zones()
-            .clusters()
-            .delete(GCP_PROJECT, GCP_LOCATION, CLUSTER_NAME)
-            .execute()
+//        gkeClient.projects()
+//            .zones()
+//            .clusters()
+//            .delete(GCP_PROJECT, GCP_LOCATION, CLUSTER_NAME)
+//            .execute()
 
         await().atMost(10, TimeUnit.MINUTES)
             .ignoreException(GoogleJsonResponseException.class)
@@ -126,7 +126,7 @@ class GoogleKubernetesConfiguration {
     }
 
     private static ServiceAccountCredentials loadCredentials() {
-        new File("${System.getProperty('user.home')}/.config/gcloud/jenkins-ci-creds.json").withInputStream { inputStream ->
+        new File(System.getProperty('GCP_SERVICE_CREDENTIALS')).withInputStream { inputStream ->
             def userCredentials = ServiceAccountCredentials.fromStream(inputStream)
             def scopedCredentials = userCredentials.createScoped(ContainerScopes.CLOUD_PLATFORM)
             scopedCredentials.refreshIfExpired()
@@ -135,13 +135,14 @@ class GoogleKubernetesConfiguration {
     }
 
     static void main(String[] args) {
+        System.getenv().each { name, value -> println "Name: $name -> Value $value" }
+
         if (args[0] == "setup") {
             new GoogleKubernetesConfiguration().setup()
         }
         if (args[0] == "destroy") {
             new GoogleKubernetesConfiguration().destroy()
-        }
-        else throw new IllegalArgumentException("Argument [setup | destroy] must be provided")
+        } else throw new IllegalArgumentException("Argument [setup | destroy] must be provided")
     }
 }
 
