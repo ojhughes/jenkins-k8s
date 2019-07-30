@@ -126,7 +126,7 @@ class GoogleKubernetesConfiguration {
     }
 
     private static ServiceAccountCredentials loadCredentials() {
-        new File(System.getProperty('GCP_SERVICE_CREDENTIALS')).withInputStream { inputStream ->
+        new File(System.getenv('GCP_SERVICE_CREDENTIALS')).withInputStream { inputStream ->
             def userCredentials = ServiceAccountCredentials.fromStream(inputStream)
             def scopedCredentials = userCredentials.createScoped(ContainerScopes.CLOUD_PLATFORM)
             scopedCredentials.refreshIfExpired()
