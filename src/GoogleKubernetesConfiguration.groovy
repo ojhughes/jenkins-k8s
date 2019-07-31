@@ -24,33 +24,49 @@ import static org.awaitility.Awaitility.await
 ])
 class GoogleKubernetesConfiguration {
 
-    private final def APPLICATION_NAME = "spring-cloud-kubernetes-ci-build"
-    private final def HTTP_TRANSPORT = new NetHttpTransport()
-    private final def JSON_FACTORY = new JacksonFactory()
-    private final def GCP_LOCATION = "europe-west2-a"
-    private final def GCP_PROJECT = "cf-sandbox-ohughes"
-    private final def CLUSTER_NAME = "${APPLICATION_NAME}-cluster"
-    private final def KUBECONFIG_FILE = getClass().getResource("out/jenkins-kubeconfig.yml")
+    private final APPLICATION_NAME = "spring-cloud-k8s-ci"
+    private final HTTP_TRANSPORT = new NetHttpTransport()
+    private final JSON_FACTORY = new JacksonFactory()
+    private final GCP_LOCATION = "europe-west2-a"
+    private final GCP_PROJECT = "cf-sandbox-ohughes"
+    private final BUILD_NUMBER = System.getenv("BUILD_NUMBER") ?: "0"
+    private final CLUSTER_NAME = "${APPLICATION_NAME}-cluster-${BUILD_NUMBER}"
+    private final KUBECONFIG_DIRECTORY = System.getenv("WORKSPACE") ?: "/tmp"
+    private final KUBECONFIG_FILE = "${KUBECONFIG_DIRECTORY}/kubeconfig.yml"
 
     void setup() {
         def credentials = loadCredentials()
-        def gkeClient = new Container.Builder(HTTP_TRANSPORT, JSON_FACTORY, new HttpCredentialsAdapter(credentials))
-            .setApplicationName(APPLICATION_NAME)
-            .build()
-
+        def gkeClient = setupGoogleCloudApiClient(credentials)
         def request = buildClusterRequest()
-
-        gkeClient.projects()
-            .zones()
-            .clusters()
-            .create(GCP_PROJECT, GCP_LOCATION, request)
-            .execute()
+        createCluster(gkeClient, request)
 
         await().atMost(10, TimeUnit.MINUTES)
+            .ignoreException(GoogleJsonResponseException.class)
             .pollInterval(5, TimeUnit.SECONDS)
             .until { getCluster(gkeClient).getStatus() == "RUNNING" }
 
         createKubeConfig(gkeClient, credentials)
+    }
+
+    private void createCluster(Container gkeClient, CreateClusterRequest request) {
+        try {
+            gkeClient.projects()
+                .zones()
+                .clusters()
+                .create(GCP_PROJECT, GCP_LOCATION, request)
+                .execute()
+        } catch (GoogleJsonResponseException ex) {
+            if (ex.statusCode == 409){
+                //Ignore error if cluster with same name already exists
+            }
+            else throw ex
+        }
+    }
+
+    private setupGoogleCloudApiClient(ServiceAccountCredentials credentials) {
+        new Container.Builder(HTTP_TRANSPORT, JSON_FACTORY, new HttpCredentialsAdapter(credentials))
+            .setApplicationName(APPLICATION_NAME)
+            .build()
     }
 
     void destroy() {
@@ -58,16 +74,15 @@ class GoogleKubernetesConfiguration {
             .setApplicationName(APPLICATION_NAME)
             .build()
 
-//        gkeClient.projects()
-//            .zones()
-//            .clusters()
-//            .delete(GCP_PROJECT, GCP_LOCATION, CLUSTER_NAME)
-//            .execute()
+        gkeClient.projects()
+            .zones()
+            .clusters()
+            .delete(GCP_PROJECT, GCP_LOCATION, CLUSTER_NAME)
+            .execute()
 
         await().atMost(10, TimeUnit.MINUTES)
-            .ignoreException(GoogleJsonResponseException.class)
             .pollInterval(5, TimeUnit.SECONDS)
-            .until { getCluster(gkeClient).getStatus() == null }
+            .until { getCluster(gkeClient) == null }
     }
 
     private void createKubeConfig(Container gkeClient, ServiceAccountCredentials credentials) {
@@ -98,7 +113,7 @@ class GoogleKubernetesConfiguration {
                  name   : clusterInfo.getName()
              ]] as ArrayList
 
-        def persister = new FilePersister(KUBECONFIG_FILE.path)
+        def persister = new FilePersister(KUBECONFIG_FILE)
         persister.save(contexts, clusters, users, null, clusterInfo.getName())
     }
 
@@ -118,11 +133,15 @@ class GoogleKubernetesConfiguration {
     }
 
     private Cluster getCluster(Container container) {
-        container.projects()
-            .zones()
-            .clusters()
-            .get(GCP_PROJECT, GCP_LOCATION, CLUSTER_NAME)
-            .execute()
+        try {
+            container.projects()
+                .zones()
+                .clusters()
+                .get(GCP_PROJECT, GCP_LOCATION, CLUSTER_NAME)
+                .execute()
+        } catch (GoogleJsonResponseException ex) {
+            null
+        }
     }
 
     private static ServiceAccountCredentials loadCredentials() {
@@ -135,14 +154,15 @@ class GoogleKubernetesConfiguration {
     }
 
     static void main(String[] args) {
-        System.getenv().each { name, value -> println "Name: $name -> Value $value" }
+        System.getenv().each { name, value -> println "$name: $value" }
 
         if (args[0] == "setup") {
             new GoogleKubernetesConfiguration().setup()
         }
-        if (args[0] == "destroy") {
+        else if (args[0] == "destroy") {
             new GoogleKubernetesConfiguration().destroy()
-        } else throw new IllegalArgumentException("Argument [setup | destroy] must be provided")
+        }
+        else throw new IllegalArgumentException("Argument [setup | destroy] must be provided")
     }
 }
 
